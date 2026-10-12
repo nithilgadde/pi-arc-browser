@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Pi Arc Browser",
+  "version": "1.0.0",
+  "description": "Allows Pi to use the active eligible Arc tab through a local browser bridge.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "debugger",
+    "storage",
+    "tabs"
+  ],
+  "background": {
+    "service_worker": "service-worker.mjs",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Pi Arc Browser",
+    "default_popup": "popup.html"
+  }
+}

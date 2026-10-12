@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pi Arc Browser</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div class="mark" aria-hidden="true">π</div>
+      <div>
+        <h1>Arc Companion</h1>
+        <p class="eyebrow">Local tab bridge</p>
+      </div>
+    </header>
+
+    <section class="connection" aria-labelledby="connection-title">
+      <div class="section-heading">
+        <h2 id="connection-title">Connection</h2>
+        <div class="status-line"><span id="status-dot" class="status-dot"></span><span id="status">Loading…</span></div>
+      </div>
+      <label for="pairing">Pairing JSON</label>
+      <textarea id="pairing" rows="3" spellcheck="false" autocomplete="off" placeholder='{"port":3210,"token":"…"}'></textarea>
+      <p class="hint">Stored only for this browser session. The token is never displayed again.</p>
+      <label class="mode-toggle" for="follow-active">
+        <input id="follow-active" type="checkbox" checked>
+        <span>
+          <strong>Follow active tab</strong>
+          <small>Pi can access only the active tab in your last-used normal Arc window.</small>
+        </span>
+      </label>
+      <p id="access-disclosure" class="disclosure">Connect allows Pi to inspect and control the current allowed tab when Pi requests it. Background tabs remain inaccessible.</p>
+      <div class="button-row">
+        <button id="connect" class="primary" type="button">Connect</button>
+        <button id="disconnect" type="button">Disconnect</button>
+      </div>
+    </section>
+
+    <section aria-labelledby="tabs-title">
+      <div class="section-heading">
+        <h2 id="tabs-title">Accessible tab</h2>
+        <span id="tab-count" class="count">0</span>
+      </div>
+      <p id="shared-tabs" class="shared-list">None</p>
+      <div id="manual-controls" class="button-stack" hidden>
+        <button id="share" class="primary" type="button">Share current tab</button>
+        <button id="unshare" type="button">Unshare current tab</button>
+      </div>
+      <p id="tabs-hint" class="hint">Pi resolves the active allowed tab only when requested. Arc shows its normal debugger banner while attached.</p>
+    </section>
+
+    <p id="error" class="error" role="alert" hidden></p>
+  </main>
+  <script type="module" src="popup.mjs"></script>
+</body>
+</html>

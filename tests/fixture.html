@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Pi browser safe test page</title>
+<style>body{font:18px system-ui;margin:32px}label{display:block;margin:16px 0}input,button,select{font:inherit}#below{margin-top:1000px}</style>
+<h1>Browser smoke test</h1>
+<p>This local fixture never sends or saves your data.</p>
+<label>Name <input id="name" aria-label="Name"></label>
+<label>Notes <textarea id="notes" aria-label="Notes"></textarea></label>
+<label>Password test (fake) <input id="password" type="password" value="fake-test-secret" aria-label="Password"></label>
+<label>Color <select id="color" aria-label="Color"><option value="red">Red</option><option value="blue">Blue</option></select></label>
+<button id="increment">Increment</button><output id="count">0</output>
+<button id="replace">Replace name field</button>
+<div id="shadow"></div>
+<p id="below">Bottom marker</p>
+<script>
+let n=0;document.querySelector('#increment').onclick=()=>document.querySelector('#count').textContent=String(++n);
+document.querySelector('#replace').onclick=()=>document.querySelector('#name').replaceWith(document.querySelector('#name').cloneNode());
+const root=document.querySelector('#shadow').attachShadow({mode:'open'});root.innerHTML='<button id="shadow-button">Shadow action</button><output></output>';root.querySelector('button').onclick=()=>root.querySelector('output').textContent='done';
+</script>
+</html>

@@ -1,0 +1,21 @@
+node_modules/
+*.log
+.DS_Store
+coverage/
+
+# Local agent state and credentials
+.pi/
+context.md
+.env
+.env.*
+!.env.example
+pairing*.json
+*.pem
+*.key
+
+# Browser captures and generated test artifacts
+screenshots/
+snapshots/
+artifacts/
+tests/artifacts/
+*.har
