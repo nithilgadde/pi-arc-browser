@@ -21,7 +21,11 @@ A dependency-free Chrome Manifest V3 extension for allowing Pi to use the active
 
 Background tabs remain inaccessible. Switching tabs causes the previously followed debugger to detach; Pi must call `tabs` again and use the new tab ID. Protected and extension pages return an empty list rather than falling back to a background page. Incognito tabs are never auto-followed.
 
-For legacy behavior, uncheck **Follow active tab** while disconnected. Manual **Share current tab** and **Unshare current tab** controls then appear. The mode cannot be changed while connecting or connected.
+For legacy behavior, choose **Manual shared tabs** in the **Browser access** selector while disconnected. Manual **Share current tab** and **Unshare current tab** controls then appear. The mode cannot be changed while connecting or connected.
+
+For separate work while you browse, choose **Background agent tabs** before connecting. Pi's `open` creates inactive tabs without focusing a window. Only tabs created in this connection are owned; existing tabs and website-created popups are never adopted. Multiple agent tabs are supported. Pi cannot `focus` any tab in this mode, and all content actions pause if you select an agent tab. Disconnect leaves tabs open but forgets ownership; a reconnect needs new agent tabs. Cancelling debugging or detaching revokes that tab without silent reattachment.
+
+Background tabs use your existing profile/logins. Websites may open their own foreground popups or dialogs, or throttle background rendering; the companion does not seize focus back or promise desktop isolation.
 
 Pairing and the follow preference are stored in `chrome.storage.session`, never sync storage. The extension does not reconnect automatically. **Disconnect**, a WebSocket loss, closing a tab, navigating to a protected page, or Chrome detaching the debugger revokes access as applicable. A debugger cancellation, follow-mode unshare, or `detach` action pauses all automatic following until an explicit disconnect and reconnect. Disconnecting detaches every companion-owned debugger session.
 
@@ -29,7 +33,8 @@ Pairing and the follow preference are stored in `chrome.storage.session`, never 
 
 - In follow mode, `tabs` returns only the current eligible tab from Arc's last-focused normal window. It never returns background-tab metadata.
 - Every targeted follow-mode action refuses a tab ID that is no longer active and tells the caller to re-run `tabs`; actions are never redirected to a different tab.
-- Every CDP command rechecks both the connection generation and active-tab scope. Snapshot and screenshot scope is checked again before their page data is returned.
+- Every CDP command rechecks the connection generation and applicable scope: current active tab in follow mode, or owned and inactive agent tab in background mode. Snapshot, screenshot, and select-result scope is checked again before page-derived data is returned.
+- Background tab ownership is connection-local, checked before fetching tab metadata, and never restored from storage. Its `open` action uses `active: false` in a non-incognito normal window. `focus` and manual sharing are denied.
 - In manual mode, only tabs shared by an explicit popup gesture are exposed. The remote `open` action may create and follow/share a new HTTP(S) tab while connected.
 - Every action rechecks the current tab URL. Browser-internal pages, files, extension pages, Chrome Web Store pages, and Edge Add-ons pages are rejected.
 - There are no content scripts, externally connectable messages, cookie permissions, network interception permissions, or page `postMessage` channels.
@@ -57,7 +62,9 @@ The bridge answers `{"type":"ready"}`. The extension then sends `{"type":"ping"}
 
 Requests execute sequentially. Unknown actions, duplicate in-flight IDs, invalid parameters, text messages over 1 MiB, and invalid URL schemes are rejected. Queued requests are discarded on disconnect, every CDP send rechecks the originating connection generation and follow scope, and in-flight results are not delivered after that generation or active tab changes. There is no action retry.
 
-`tabs` returns `accessMode: "follow-active"` or `accessMode: "manual"`. Follow mode returns either one active eligible tab or `tabs: []` with an explanatory `note`.
+`tabs` returns `accessMode: "follow-active"`, `"manual"`, or `"background"`. Follow mode returns one active eligible tab or `tabs: []` with an explanatory `note`. Background mode returns only current-connection agent tabs (initially empty); an owned tab's `active: true` means its content actions are paused for user control.
+
+Popup-only control: `{type:"setAccessMode", mode:"background"}` (or the other modes) is accepted only while disconnected. Legacy `{type:"setFollowActive", enabled:boolean}` maps to follow-active/manual. The remote bridge has no mode-changing action.
 
 Supported actions: `tabs`, `open`, `focus`, `close`, `navigate`, `back`, `forward`, `reload`, `snapshot`, `click`, `fill`, `type`, `press`, `scroll`, `hover`, `select`, `screenshot`, `wait`, `detach`, and optional `drag`.
 
@@ -68,5 +75,7 @@ Snapshot limits are `maxChars: 100..20000` (default 12000) and `maxElements: 1..
 From the repository root:
 
 ```sh
-node --test tests/companion.test.mjs
+node --test tests/companion.test.mjs tests/background-policy.test.mjs
+# With a Chromium executable and playwright-core installed:
+PI_BROWSER_CHROMIUM="/path/to/chromium" npm run test:browser
 ```

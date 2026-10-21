@@ -35,13 +35,13 @@ test('follow-active: connect once, switch tabs on demand, refuse background acce
   await second.goto(`${url}second`);
   await popup.goto(`chrome-extension://${extensionId}/popup.html`);
   const send = (type, extra = {}) => popup.evaluate(message => chrome.runtime.sendMessage(message), { type, ...extra });
-  assert.equal(await popup.locator('#follow-active').isChecked(), true);
+  assert.equal(await popup.locator('#access-mode').inputValue(), 'follow-active');
   await popup.locator('#pairing').fill(JSON.stringify(bridge.pairing));
   await popup.locator('#connect').click();
   await popup.waitForFunction(() => document.querySelector('#status').textContent.includes('Connected'));
   assert.equal(bridge.connected, true);
   assert.equal(await popup.locator('#share').isVisible(), false);
-  assert.equal(await popup.locator('#follow-active').isDisabled(), true);
+  assert.equal(await popup.locator('#access-mode').isDisabled(), true);
   assert.equal((await send('setFollowActive', { enabled: false })).ok, false);
 
   // A protected extension page is active; no fallback to a background website.

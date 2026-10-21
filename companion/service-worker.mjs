@@ -1,6 +1,6 @@
 import {
-  CompanionError, assertActiveRequestGeneration, assertFollowRequestedTab, bridgeUrl, errorMessage,
-  followTabPolicy, isAllowedPageUrl, parseBridgeMessage, parseFollowActive, parsePairing,
+  ACCESS_MODES, CompanionError, assertActiveRequestGeneration, assertBackgroundTab, assertFollowRequestedTab, bridgeUrl, errorMessage,
+  followTabPolicy, isAllowedPageUrl, parseAccessMode, parseBridgeMessage, parseFollowActive, parsePairing,
   serializeBridgeMessage, validateActionParams
 } from "./lib/contracts.mjs";
 import {
@@ -22,6 +22,7 @@ let readyTimer = null;
 let pingTimer = null;
 let lastPongAt = 0;
 let generation = 0;
+let accessMode = "follow-active";
 let followActive = true;
 let followPaused = false;
 let processing = false;
@@ -29,6 +30,8 @@ let activeRequestGeneration = null;
 let requestQueue = [];
 const pendingIds = new Set();
 const sharedTabs = new Set();
+// Connection-local provenance: never restore ownership of tabs from an earlier connection.
+const agentTabs = new Set();
 const attachedTabs = new Set();
 const snapshotStates = new Map();
 const blockedFollowTabs = new Set();
@@ -40,7 +43,8 @@ async function initialize() {
   try { await chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }); } catch {}
   const stored = await chrome.storage.session.get(SESSION_KEY);
   const old = stored?.[SESSION_KEY] || {};
-  followActive = old.followActive !== false;
+  accessMode = ACCESS_MODES.includes(old.accessMode) ? old.accessMode : (old.followActive !== false ? "follow-active" : "manual");
+  followActive = accessMode === "follow-active";
   // A restarted worker cannot retain its authenticated WebSocket. Fail closed and
   // clean up any debugger sessions recorded by the previous worker.
   for (const id of Array.isArray(old.attachedTabIds) ? old.attachedTabIds : []) {
@@ -51,6 +55,7 @@ async function initialize() {
   await chrome.storage.session.set({
     [SESSION_KEY]: {
       pairing: old.pairing || null,
+      accessMode,
       followActive,
       sharedTabIds: [],
       attachedTabIds: []
@@ -68,6 +73,7 @@ async function persistRuntimeState() {
   await chrome.storage.session.set({
     [SESSION_KEY]: {
       pairing: old.pairing || null,
+      accessMode,
       followActive,
       sharedTabIds: [...sharedTabs],
       attachedTabIds: [...attachedTabs]
@@ -81,6 +87,7 @@ async function setPairing(pairing) {
   await chrome.storage.session.set({
     [SESSION_KEY]: {
       pairing: parsed,
+      accessMode,
       followActive,
       sharedTabIds: old.sharedTabIds || [],
       attachedTabIds: old.attachedTabIds || []
@@ -89,12 +96,18 @@ async function setPairing(pairing) {
 }
 
 async function setFollowActive(enabled) {
-  if (connectionState !== "disconnected") throw new CompanionError("Disconnect before changing Follow active tab");
-  followActive = parseFollowActive(enabled);
+  return setAccessMode(parseFollowActive(enabled) ? "follow-active" : "manual");
+}
+
+async function setAccessMode(mode) {
+  if (connectionState !== "disconnected") throw new CompanionError("Disconnect before changing browser access mode");
+  accessMode = parseAccessMode(mode);
+  followActive = accessMode === "follow-active";
   followPaused = false;
   blockedFollowTabs.clear();
   await revokeAllTabs();
   await persistRuntimeState();
+  await broadcastStatus();
   return publicStatus();
 }
 
@@ -105,7 +118,7 @@ async function publicStatus() {
     detail: connectionDetail,
     paired: Boolean(state.pairing),
     followActive,
-    accessMode: followActive ? "follow-active" : "manual",
+    accessMode,
     followPaused: followActive && followPaused,
     sharedTabIds: [...sharedTabs].sort((a, b) => a - b)
   };
@@ -171,10 +184,17 @@ async function disconnect(detail = "Disconnected") {
   pendingIds.clear();
   connectionState = "disconnected";
   connectionDetail = detail;
-  if (ws && ws.readyState < WebSocket.CLOSING) {
-    try { ws.close(1000, "client disconnect"); } catch {}
-  }
+  // Finish the old close handshake before the UI can immediately reconnect. The
+  // bridge intentionally refuses replacements while it still owns a closing client.
+  const closed = !ws || ws.readyState === WebSocket.CLOSED ? Promise.resolve() : new Promise((resolve) => {
+    const timer = setTimeout(resolve, 2000);
+    ws.addEventListener("close", () => { clearTimeout(timer); resolve(); }, { once: true });
+    if (ws.readyState < WebSocket.CLOSING) {
+      try { ws.close(1000, "client disconnect"); } catch { clearTimeout(timer); resolve(); }
+    }
+  });
   await revokeAllTabs();
+  await closed;
   await broadcastStatus();
 }
 
@@ -282,6 +302,8 @@ async function detachOwnedDebugger(tabId) {
 async function attachAndShare(tabId, expectedGeneration, following = false) {
   if (connectionState !== "connected" || generation !== expectedGeneration) throw new CompanionError("Bridge disconnected before the tab could be shared");
   let tab = await chrome.tabs.get(tabId);
+  assertRequestLive(expectedGeneration);
+  if (accessMode === "background") assertBackgroundTab(tab, agentTabs.has(tabId));
   if (!isAllowedPageUrl(tab.url) || (following && tab.incognito)) {
     throw new CompanionError(following
       ? "Only non-incognito, non-protected HTTP(S) tabs can be followed"
@@ -305,7 +327,8 @@ async function attachAndShare(tabId, expectedGeneration, following = false) {
     }
   }
   try { tab = await chrome.tabs.get(tabId); } catch { tab = null; }
-  if (connectionState !== "connected" || generation !== expectedGeneration || !isAllowedPageUrl(tab?.url) || (following && tab?.incognito)) {
+  if (connectionState !== "connected" || generation !== expectedGeneration || !isAllowedPageUrl(tab?.url) || (following && tab?.incognito) ||
+      (accessMode === "background" && (!agentTabs.has(tabId) || tab?.active || tab?.incognito))) {
     attachedTabs.delete(tabId);
     await detachOwnedDebugger(tabId);
     await persistRuntimeState();
@@ -320,7 +343,7 @@ async function attachAndShare(tabId, expectedGeneration, following = false) {
 
 async function shareCurrentTab() {
   await initialized;
-  if (followActive) throw new CompanionError("Manual sharing is hidden while Follow active tab is enabled");
+  if (accessMode !== "manual") throw new CompanionError("Manual sharing is available only in Manual shared tabs mode");
   if (connectionState !== "connected") throw new CompanionError("Connect to the bridge before sharing a tab");
   const expectedGeneration = generation;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -330,6 +353,7 @@ async function shareCurrentTab() {
 }
 
 async function detachTab(tabId, shouldBroadcast = true) {
+  agentTabs.delete(tabId);
   sharedTabs.delete(tabId);
   snapshotStates.delete(tabId);
   const wasAttached = attachedTabs.delete(tabId);
@@ -340,6 +364,7 @@ async function detachTab(tabId, shouldBroadcast = true) {
 
 async function unshareCurrentTab() {
   await initialized;
+  if (accessMode === "background") throw new CompanionError("Your current tab is not shared in Background mode. Disconnect to revoke all agent tabs.");
   if (followActive) {
     if (connectionState !== "connected") throw new CompanionError("Connect before pausing Follow active tab");
     const previousTabId = [...sharedTabs][0] ?? null;
@@ -366,6 +391,7 @@ async function unshareCurrentTab() {
 async function revokeAllTabs() {
   const ids = new Set([...sharedTabs, ...attachedTabs]);
   sharedTabs.clear();
+  agentTabs.clear();
   attachedTabs.clear();
   snapshotStates.clear();
   await Promise.all([...ids].map((tabId) => detachOwnedDebugger(tabId)));
@@ -468,8 +494,19 @@ async function assertFollowCommandScope(tabId, expectedGeneration) {
   }
 }
 
+async function requireAgentTab(tabId, expectedGeneration, requireInactive = true) {
+  assertRequestLive(expectedGeneration);
+  // Check provenance BEFORE retrieving any tab metadata.
+  if (!agentTabs.has(tabId)) assertBackgroundTab(null, false);
+  const tab = await requireSharedTab(tabId);
+  assertRequestLive(expectedGeneration);
+  assertBackgroundTab(tab, agentTabs.has(tabId), requireInactive);
+  return tab;
+}
+
 async function command(tabId, method, params = {}) {
   assertActiveRequestGeneration(activeRequestGeneration, generation, connectionState);
+  if (accessMode === "background") await requireAgentTab(tabId, activeRequestGeneration);
   if (followActive) await assertFollowCommandScope(tabId, activeRequestGeneration);
   assertActiveRequestGeneration(activeRequestGeneration, generation, connectionState);
   return chrome.debugger.sendCommand({ tabId }, method, params);
@@ -477,6 +514,7 @@ async function command(tabId, method, params = {}) {
 
 async function assertResultScope(tabId, expectedGeneration) {
   assertRequestLive(expectedGeneration);
+  if (accessMode === "background") await requireAgentTab(tabId, expectedGeneration);
   if (followActive) await assertFollowCommandScope(tabId, expectedGeneration);
   assertRequestLive(expectedGeneration);
 }
@@ -629,9 +667,45 @@ function assertRequestLive(requestGeneration) {
   }
 }
 
+async function openBackgroundTab(url, expectedGeneration) {
+  assertRequestLive(expectedGeneration);
+  const targetWindow = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+  assertRequestLive(expectedGeneration);
+  if (!targetWindow?.id || targetWindow.incognito) {
+    throw new CompanionError("Open a non-incognito normal Arc window first. Pi will not create or focus a window.");
+  }
+  const created = await chrome.tabs.create({ url, active: false, windowId: targetWindow.id });
+  try {
+    const tab = await waitForUrl(created.id, url, expectedGeneration);
+    assertRequestLive(expectedGeneration);
+    assertBackgroundTab(tab, true);
+    agentTabs.add(tab.id);
+    await attachAndShare(tab.id, expectedGeneration);
+    const verified = await requireAgentTab(tab.id, expectedGeneration);
+    return {
+      tab: { id: verified.id, url: verified.url, title: verified.title || "", active: false },
+      accessMode: "background"
+    };
+  } catch (error) {
+    // Never close an errored tab that the user may already have taken over.
+    if (generation === expectedGeneration && agentTabs.has(created.id)) await detachTab(created.id);
+    throw new CompanionError(`${errorMessage(error)} The newly opened tab was left open without agent access.`);
+  }
+}
+
 async function executeAction(action, untrustedParams, requestGeneration) {
   const params = validateActionParams(action, untrustedParams);
   if (action === "tabs") {
+    if (accessMode === "background") {
+      const tabs = [];
+      for (const tabId of [...agentTabs]) {
+        try {
+          const tab = await requireAgentTab(tabId, requestGeneration, false);
+          tabs.push({ id: tab.id, url: tab.url, title: tab.title || "", active: Boolean(tab.active) });
+        } catch (error) { assertRequestLive(requestGeneration); }
+      }
+      return { tabs, accessMode: "background", note: "Only tabs opened by Pi in this connection are accessible. Open a URL to create an inactive agent tab. Existing tabs stay private; focus is disabled. Work pauses on agent tabs you select." };
+    }
     if (followActive) {
       const active = await resolveFollowActive(requestGeneration);
       if (!active.tab) return { tabs: [], accessMode: "follow-active", note: active.note };
@@ -651,6 +725,7 @@ async function executeAction(action, untrustedParams, requestGeneration) {
     return { tabs, accessMode: "manual" };
   }
   if (action === "open") {
+    if (accessMode === "background") return openBackgroundTab(params.url, requestGeneration);
     assertRequestLive(requestGeneration);
     if (followActive && followPaused) {
       throw new FollowScopeError("Follow active tab access is paused. Disconnect and reconnect before opening a tab through Pi.");
@@ -693,8 +768,13 @@ async function executeAction(action, untrustedParams, requestGeneration) {
     }
   }
 
+  if (accessMode === "background" && action === "focus") {
+    throw new CompanionError("Focus is disabled in Background mode. Pi will not switch your current tab or window.");
+  }
   let tab;
-  if (followActive) {
+  if (accessMode === "background") {
+    tab = await requireAgentTab(params.tabId, requestGeneration);
+  } else if (followActive) {
     const active = await resolveFollowActive(requestGeneration, params.tabId);
     if (!active.tab) throw new FollowScopeError(active.note);
     tab = active.tab;
@@ -708,23 +788,28 @@ async function executeAction(action, untrustedParams, requestGeneration) {
       try { await chrome.windows.update(tab.windowId, { focused: true }); } catch {}
       return { tabId: tab.id };
     case "close":
-      await detachTab(tab.id);
-      assertRequestLive(requestGeneration);
+      // Recheck after asynchronous work; never close a tab the user just selected.
+      await assertResultScope(tab.id, requestGeneration);
       await chrome.tabs.remove(tab.id);
+      await detachTab(tab.id);
       return { tabId: tab.id, closed: true };
     case "navigate":
+      await assertResultScope(tab.id, requestGeneration);
       snapshotStates.delete(tab.id);
       await chrome.tabs.update(tab.id, { url: params.url });
       return { tabId: tab.id, url: params.url };
     case "back":
+      await assertResultScope(tab.id, requestGeneration);
       snapshotStates.delete(tab.id);
       await chrome.tabs.goBack(tab.id);
       return { tabId: tab.id };
     case "forward":
+      await assertResultScope(tab.id, requestGeneration);
       snapshotStates.delete(tab.id);
       await chrome.tabs.goForward(tab.id);
       return { tabId: tab.id };
     case "reload":
+      await assertResultScope(tab.id, requestGeneration);
       snapshotStates.delete(tab.id);
       await chrome.tabs.reload(tab.id);
       return { tabId: tab.id };
@@ -784,6 +869,7 @@ async function executeAction(action, untrustedParams, requestGeneration) {
     }
     case "select": {
       const result = await resolveRef(tab.id, params.ref, "select", params.values);
+      await assertResultScope(tab.id, requestGeneration);
       return { tabId: tab.id, values: result.values };
     }
     case "screenshot": {
@@ -800,6 +886,8 @@ async function executeAction(action, untrustedParams, requestGeneration) {
       if (followActive) {
         const current = await resolveFollowActive(requestGeneration, tab.id);
         if (!current.tab) throw new FollowScopeError(current.note);
+      } else if (accessMode === "background") {
+        await requireAgentTab(tab.id, requestGeneration);
       } else {
         await requireSharedTab(tab.id);
       }
@@ -845,6 +933,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "getStatus": return publicStatus();
       case "setPairing": await setPairing(message.pairing); return publicStatus();
       case "setFollowActive": return setFollowActive(message.enabled);
+      case "setAccessMode": return setAccessMode(message.mode);
       case "connect": await connect(); return publicStatus();
       case "shareCurrent": await shareCurrentTab(); return publicStatus();
       case "unshareCurrent": await unshareCurrentTab(); return publicStatus();
@@ -860,6 +949,7 @@ chrome.debugger.onDetach.addListener((source, reason) => {
   const intentional = intentionalDetachTabs.delete(source.tabId);
   if (!sharedTabs.has(source.tabId) && !attachedTabs.has(source.tabId)) return;
   sharedTabs.delete(source.tabId);
+  agentTabs.delete(source.tabId);
   attachedTabs.delete(source.tabId);
   snapshotStates.delete(source.tabId);
   if (followActive && !intentional && reason !== "target_closed" && connectionState === "connected") {
@@ -871,7 +961,8 @@ chrome.debugger.onDetach.addListener((source, reason) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  if (!sharedTabs.has(tabId) && !attachedTabs.has(tabId)) return;
+  if (!sharedTabs.has(tabId) && !attachedTabs.has(tabId) && !agentTabs.has(tabId)) return;
+  agentTabs.delete(tabId);
   sharedTabs.delete(tabId);
   attachedTabs.delete(tabId);
   snapshotStates.delete(tabId);

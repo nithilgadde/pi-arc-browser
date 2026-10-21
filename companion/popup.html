@@ -24,13 +24,12 @@
       <label for="pairing">Pairing JSON</label>
       <textarea id="pairing" rows="3" spellcheck="false" autocomplete="off" placeholder='{"port":3210,"token":"…"}'></textarea>
       <p class="hint">Stored only for this browser session. The token is never displayed again.</p>
-      <label class="mode-toggle" for="follow-active">
-        <input id="follow-active" type="checkbox" checked>
-        <span>
-          <strong>Follow active tab</strong>
-          <small>Pi can access only the active tab in your last-used normal Arc window.</small>
-        </span>
-      </label>
+      <label class="mode-label" for="access-mode">Browser access</label>
+      <select id="access-mode" aria-describedby="access-disclosure">
+        <option value="follow-active">Follow active tab</option>
+        <option value="background">Background agent tabs</option>
+        <option value="manual">Manual shared tabs</option>
+      </select>
       <p id="access-disclosure" class="disclosure">Connect allows Pi to inspect and control the current allowed tab when Pi requests it. Background tabs remain inaccessible.</p>
       <div class="button-row">
         <button id="connect" class="primary" type="button">Connect</button>

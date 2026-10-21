@@ -4,7 +4,7 @@ const elements = {
   pairing: document.querySelector("#pairing"),
   connect: document.querySelector("#connect"),
   disconnect: document.querySelector("#disconnect"),
-  followActive: document.querySelector("#follow-active"),
+  accessMode: document.querySelector("#access-mode"),
   accessDisclosure: document.querySelector("#access-disclosure"),
   manualControls: document.querySelector("#manual-controls"),
   tabsTitle: document.querySelector("#tabs-title"),
@@ -37,21 +37,27 @@ function render(status) {
   elements.statusDot.className = `status-dot ${status.connection}`;
   elements.tabCount.textContent = String(status.sharedTabIds.length);
   elements.sharedTabs.textContent = status.sharedTabIds.length ? status.sharedTabIds.join(" · ") : "None";
-  const following = status.followActive !== false;
-  elements.followActive.checked = following;
-  elements.followActive.disabled = busy || status.connection !== "disconnected";
-  elements.manualControls.hidden = following;
-  elements.tabsTitle.textContent = following ? "Accessible tab" : "Shared tabs";
-  elements.accessDisclosure.textContent = following
-    ? "Connect allows Pi to inspect and control the current allowed tab when Pi requests it. Background tabs remain inaccessible."
-    : "Manual mode requires Share current tab. Only tabs listed below are accessible.";
-  elements.tabsHint.textContent = following
-    ? "Pi resolves the active allowed tab only when requested. Arc shows its normal debugger banner while attached."
-    : "Only HTTP(S) tabs you explicitly share are accessible. Arc shows its normal debugger banner while attached.";
+  const mode = status.accessMode || (status.followActive !== false ? "follow-active" : "manual");
+  const following = mode === "follow-active";
+  const background = mode === "background";
+  elements.accessMode.value = mode;
+  elements.accessMode.disabled = busy || status.connection !== "disconnected";
+  elements.manualControls.hidden = mode !== "manual";
+  elements.tabsTitle.textContent = background ? "Agent tabs" : following ? "Accessible tab" : "Shared tabs";
+  elements.accessDisclosure.textContent = background
+    ? "Pi opens its own inactive tabs without switching yours. Existing tabs stay private. These tabs use your current browser logins, not a separate profile."
+    : following
+      ? "Connect allows Pi to inspect and control the current allowed tab when Pi requests it. Background tabs remain inaccessible."
+      : "Manual mode requires Share current tab. Only tabs listed below are accessible.";
+  elements.tabsHint.textContent = background
+    ? "Ask Pi to open a URL. Work pauses if you select an agent tab. Disconnect revokes access but leaves tabs open."
+    : following
+      ? "Pi resolves the active allowed tab only when requested. Arc shows its normal debugger banner while attached."
+      : "Only HTTP(S) tabs you explicitly share are accessible. Arc shows its normal debugger banner while attached.";
   elements.connect.disabled = busy || connected || transitioning;
   elements.disconnect.disabled = busy || status.connection === "disconnected";
-  elements.share.disabled = busy || !connected || following;
-  elements.unshare.disabled = busy || !connected || following || status.sharedTabIds.length === 0;
+  elements.share.disabled = busy || !connected || mode !== "manual";
+  elements.unshare.disabled = busy || !connected || mode !== "manual" || status.sharedTabIds.length === 0;
   if (status.paired && !elements.pairing.value) elements.pairing.placeholder = "Pairing saved for this browser session";
 }
 
@@ -60,12 +66,12 @@ function showError(error) {
   elements.error.hidden = false;
 }
 
-async function run(button, operation, pendingFollowValue) {
+async function run(button, operation, pendingMode) {
   elements.error.hidden = true;
   busy = true;
   button.dataset.state = "loading";
   render(latestStatus);
-  if (typeof pendingFollowValue === "boolean") elements.followActive.checked = pendingFollowValue;
+  if (typeof pendingMode === "string") elements.accessMode.value = pendingMode;
   try {
     const status = await operation();
     button.dataset.state = "success";
@@ -90,9 +96,9 @@ elements.connect.addEventListener("click", () => run(elements.connect, async () 
   return send("connect");
 }));
 elements.disconnect.addEventListener("click", () => run(elements.disconnect, () => send("disconnect")));
-elements.followActive.addEventListener("change", () => {
-  const enabled = elements.followActive.checked;
-  void run(elements.followActive, () => send("setFollowActive", { enabled }), enabled);
+elements.accessMode.addEventListener("change", () => {
+  const mode = elements.accessMode.value;
+  void run(elements.accessMode, () => send("setAccessMode", { mode }), mode);
 });
 elements.share.addEventListener("click", () => run(elements.share, () => send("shareCurrent")));
 elements.unshare.addEventListener("click", () => run(elements.unshare, () => send("unshareCurrent")));

@@ -34,7 +34,7 @@ test('real Chromium companion: pair, opt-in, observe, act, verify, revoke', { sk
   const page = await context.newPage();
   await page.goto(url);
   await popup.goto(`chrome-extension://${extensionId}/popup.html`);
-  await popup.locator('#follow-active').uncheck(); // Exercise legacy manual sharing explicitly.
+  await popup.locator('#access-mode').selectOption('manual'); // Exercise legacy manual sharing explicitly.
   await popup.locator('#pairing').fill(JSON.stringify(bridge.pairing));
   await popup.locator('#connect').click();
   await popup.waitForFunction(() => document.querySelector('#share').disabled === false);

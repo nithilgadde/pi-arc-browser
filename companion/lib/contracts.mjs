@@ -105,6 +105,23 @@ export function followTabPolicy(tab, blocked = false) {
   return { eligible: true, code: "allowed", note: "Only the active tab is accessible; background tabs remain unavailable." };
 }
 
+export const ACCESS_MODES = Object.freeze(["follow-active", "manual", "background"]);
+
+export function parseAccessMode(value) {
+  if (!ACCESS_MODES.includes(value)) fail("Access mode must be follow-active, manual, or background");
+  return value;
+}
+
+export function assertBackgroundTab(tab, owned, requireInactive = true) {
+  if (!owned) fail("This tab is not an agent-owned background tab from this connection");
+  if (!tab || tab.incognito || !isAllowedPageUrl(tab.url)) {
+    fail("Agent tabs must remain on non-incognito, allowed HTTP(S) pages");
+  }
+  if (requireInactive && tab.active) {
+    fail("Agent tab is active under user control. Switch away from it to allow background work; Pi will not move your focus.");
+  }
+}
+
 export function assertFollowRequestedTab(requestedTabId, activeTabId) {
   if (requestedTabId !== activeTabId) {
     fail("The active Arc tab changed. Re-run tabs and use the returned active tabId; the action was not redirected.");

@@ -11,10 +11,21 @@ Use `arc_browser`, not a separate Playwright browser or macOS-wide mouse automat
 
 1. Call `arc_browser` with `{ "action": "status" }`.
 2. If disconnected, have the user run `/browser start` in Pi. This starts a private loopback bridge and copies a pairing JSON to the macOS clipboard.
-3. The user loads this package's `../../companion` folder as an unpacked extension at `chrome://extensions` in Arc (Developer mode), pastes pairing into the popup, leaves **Follow active tab** checked, and clicks **Connect**. No Share click is needed. This setting is chosen by the user, never by the model.
+3. The user loads this package's `../../companion` folder as an unpacked extension at `chrome://extensions` in Arc (Developer mode), pastes pairing into the popup, selects a **Browser access** mode, and clicks **Connect**. **Follow active tab** is the default and needs no Share click. This setting is chosen by the user, never by the model.
 4. Call `{ "action": "tabs" }` at the start of **every new browser task**. In `follow-active` mode, the companion automatically authorizes only the active allowed HTTP(S) tab in the last-focused normal Arc window, even when the user has returned to the Pi terminal. Previous/background tabs are not accessible. Use the returned explicit `tabId`, never a remembered/guessed one. Switching to a protected page must not fall back to the previous tab.
-5. For legacy manual access, the user can disconnect, uncheck **Follow active tab**, reconnect, and use **Share current tab**. Only in `manual` mode should you instruct the user to share tabs.
+5. For legacy manual access, the user can disconnect, select **Manual shared tabs**, reconnect, and use **Share current tab**. Only in `manual` mode should you instruct the user to share tabs.
 6. Browser access mode is separate from mutation approval mode. Pi still asks before every mutation by default. The user can explicitly choose `/browser mode auto` for fewer dialogs. Never change either permission setting yourself or pressure the user to do so.
+
+## Dedicated background agent tabs
+
+If the user wants to keep browsing while Pi works elsewhere, have them disconnect, choose **Background agent tabs**, and reconnect. Never change access mode yourself. `tabs` reports `accessMode: "background"` and initially an empty list—this is expected, not a missing Share step.
+
+- Use `open` with the task URL. It creates an **inactive** tab without focusing the browser. Use the returned `tab.id` for all operations. Multiple agent tabs are allowed and can be listed with `tabs`.
+- Only tabs created by Pi during this connection are accessible. Existing personal tabs, user-created tabs, and site-created popups are not authorized, even if their IDs are known.
+- Use snapshot/screenshot, clicks, fill/type, select, scroll, and navigation directly on the inactive tab. Do **not** use `focus`, tab-switching shortcuts, a separate tool, or OS-level mouse/keyboard control; background mode refuses focus.
+- If the user selects an agent tab, content operations pause. Ask them to switch away when ready; never move their focus yourself. An already dispatched action cannot be undone.
+- Detaching or cancelling the debugger revokes that tab. Do not reattach it through another route. Disconnect revokes all ownership and leaves tabs open; reconnect starts with no owned tabs. Open fresh task tabs rather than attempting to adopt old ones.
+- These tabs share the user's existing browser logins and site storage. They are not isolated accounts/profiles. Some websites throttle background activity or open their own dialogs/windows; report limitations rather than bringing tabs to the foreground.
 
 ## Observe → act → verify
 
@@ -28,7 +39,7 @@ Use `arc_browser`, not a separate Playwright browser or macOS-wide mouse automat
 - Take a new snapshot after navigation, significant page changes, or a stale-ref error. Do not reuse refs across snapshots. Do not retry submit/click/type blindly after an error: an action may already have happened.
 - Verify the resulting page state before claiming task completion.
 
-Keep calls sequential. If the active tab changes, the companion refuses requests targeting the previous tab. Re-run `tabs` and inspect; do not silently redirect an old click or text entry to a new tab, or focus the old tab to bypass the restriction. If a task needs a background tab, ask the user to activate it or explicitly choose manual sharing. In follow mode, a newly active normal tab can be discovered on the next `tabs` call; in manual mode new popups need explicit sharing. Do not request global browser access to work around a restriction.
+Keep calls sequential. In **follow-active mode**, if the active tab changes, the companion refuses requests targeting the previous tab. Re-run `tabs` and inspect; do not silently redirect an old click or text entry to a new tab, or focus the old tab to bypass the restriction. If a task needs an existing background tab, ask the user to activate it or explicitly choose manual sharing. For separate work while the user browses, use the dedicated background mode described above. In follow mode, a newly active normal tab can be discovered on the next `tabs` call; in manual mode new popups need explicit sharing. Do not request global browser access to work around a restriction.
 
 Following is on-demand, not continuous surveillance: querying `tabs`/performing an action resolves the current tab. If following is paused because debugging was cancelled or the tab was detached, respect that revocation and ask the user to reconnect. Never try to silently reattach through other tools.
 
@@ -42,7 +53,7 @@ Never extract credentials, cookies, passwords, or authentication tokens. Have th
 
 Snapshots, tool arguments, and screenshots can contain private data and be transmitted to the configured Pi model and stored in Pi transcripts. Ask before inspecting highly sensitive pages. Screenshot pixels are not automatically redacted.
 
-`/browser stop`, disconnecting in the popup, stopping Pi, and reloading the extension revoke access. The user must reconnect after disconnect; follow mode requires no per-tab sharing, while manual mode requires re-sharing. Timeouts/cancellation stop the bridge connection, but cannot undo an action already dispatched. Report uncertainty and inspect before any retry.
+`/browser stop`, disconnecting in the popup, stopping Pi, and reloading the extension revoke access. The user must reconnect after disconnect; follow mode requires no per-tab sharing, manual mode requires re-sharing, and background mode requires opening new agent tabs. Timeouts/cancellation stop the bridge connection, but cannot undo an action already dispatched. Report uncertainty and inspect before any retry.
 
 ## Limits
 

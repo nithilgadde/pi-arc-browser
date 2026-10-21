@@ -73,22 +73,14 @@ textarea {
   color: var(--color-ink);
   font: 11px/1.45 var(--font-mono);
 }
-textarea:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+textarea:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 .hint { margin-top: 7px; color: var(--color-muted); font-size: 11px; line-height: 1.4; }
-.mode-toggle {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  margin-top: 12px;
-  border-top: 1px solid var(--color-line);
-  padding-top: 12px;
-  cursor: pointer;
+.mode-label { margin-top: 12px; border-top: 1px solid var(--color-line); padding-top: 12px; }
+select {
+  width: 100%; min-height: 34px; padding: 6px; border: 1px solid var(--color-line);
+  border-radius: 7px; color: var(--color-ink); background: var(--color-paper); font: inherit;
 }
-.mode-toggle input { width: 16px; height: 16px; flex: 0 0 auto; margin: 1px 0 0; accent-color: var(--color-accent); }
-.mode-toggle span { display: grid; gap: 2px; }
-.mode-toggle strong { font: 650 12px/1.25 var(--font-body); }
-.mode-toggle small { color: var(--color-muted); font: 400 11px/1.35 var(--font-body); }
-.mode-toggle:has(input:disabled) { color: var(--color-disabled); cursor: not-allowed; }
+select:disabled { color: var(--color-muted); cursor: not-allowed; }
 .disclosure { margin-top: 8px; border-left: 2px solid var(--color-accent); padding-left: 8px; color: var(--color-muted); font-size: 11px; line-height: 1.4; }
 .button-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; margin-top: 12px; }
 .button-stack { display: grid; gap: 8px; margin-top: 11px; }

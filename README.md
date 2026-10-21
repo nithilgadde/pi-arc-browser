@@ -28,7 +28,7 @@ Keep this folder in place. Pi and Arc load files from it; moving it requires rei
 ### Pair a Pi session
 
 1. In Pi, run **`/browser start`**. This copies private pairing JSON to your clipboard.
-2. Open the **Pi Arc Browser** extension popup in Arc. Paste pairing, leave **Follow active tab** checked, and click **Connect**.
+2. Open the **Pi Arc Browser** extension popup in Arc. Paste pairing, select **Follow active tab** under **Browser access**, and click **Connect**.
 3. Select the website tab you want Pi to use, return to Pi, and ask a browser task. **No Share click is needed**, including when you switch to another tab.
 
    > Look at my current Arc tab and tell me what is on the page.
@@ -41,13 +41,27 @@ Keep this folder in place. Pi and Arc load files from it; moving it requires rei
 
 The browser's debugger/automation banner is expected. Cancelling it or revoking a followed tab pauses automatic access until you explicitly reconnect.
 
-For manual multi-tab access, disconnect, uncheck **Follow active tab**, reconnect, and use **Share current tab** for each desired tab. Manual mode preserves the previous sharing workflow; new user-created tabs/popups are not automatically shared. The access-mode checkbox is disabled while connected.
+For manual multi-tab access, disconnect, select **Manual shared tabs**, reconnect, and use **Share current tab** for each desired tab. Manual mode preserves the previous sharing workflow; new user-created tabs/popups are not automatically shared. The access-mode selector is disabled while connected.
 
 Pairing is per Pi session. After disconnect, reload, or stopping Pi, reconnect. Follow mode needs no re-sharing; manual mode does. There is no automatic reconnect or action replay. Use `/browser pair` to copy the running session's pairing again. Do not paste pairing into a web page or the chat.
 
+### Let Pi work while you browse
+
+Choose **Background agent tabs** under **Browser access** while disconnected, then connect. Ask Pi, for example:
+
+> Open https://example.com in your own background tab and summarize it while I keep working here.
+
+Pi's `open` action creates an **inactive tab**, without activating a tab or focusing a window. Pi can create several task tabs and inspect, screenshot, type, click, scroll, and navigate them while you use your own tab. `tabs` lists only tabs created by Pi during this connection. Your existing tabs are not accessible; manual sharing and `focus` are disabled in this mode.
+
+If you select an agent tab, its content operations pause so Pi cannot type while you are using it. Switch away when you want background work to continue. Disconnecting, cancelling that tab's debugger, or detaching revokes access. Tabs stay open; reconnecting starts a new empty ownership set rather than adopting old tabs.
+
+**Limits:** this uses the same browser profile and logins, not an isolated account. Website-created popups, new-window links, downloads, or native dialogs can still interrupt you; Pi does not automatically control those new tabs or move focus back. Some sites throttle background rendering or require foreground interaction. Pi must report those limitations rather than switching tabs behind your back. For popup-heavy workflows, use manual assistance or a separate browser/profile.
+
+Access mode is separate from `/browser mode ask|auto`: background work does not automatically waive confirmations for mutations or sensitive actions.
+
 ### Updating an already loaded companion
 
-After changing these source files, open `chrome://extensions` in Arc and click the reload icon on **Pi Arc Browser**. Run `/reload` then `/browser start` in Pi, paste the new pairing into the companion, and connect. Follow active tab is enabled by default; previously chosen manual mode remains available.
+After changing these source files, open `chrome://extensions` in Arc and click the reload icon on **Pi Arc Browser**. Run `/reload` then `/browser start` in Pi, paste the new pairing into the companion, and connect. Follow active tab remains the default; select Background agent tabs to enable dedicated background work, or Manual shared tabs for explicit multi-tab access.
 
 ## Commands
 
@@ -67,7 +81,7 @@ In auto mode, the agent is still instructed to ask before sensitive actions. **T
 
 The `arc_browser` tool supports:
 
-- Active-tab discovery without sharing clicks, or explicit multi-tab sharing in manual mode.
+- Active-tab discovery without sharing clicks, dedicated inactive agent tabs, or explicit multi-tab sharing in manual mode.
 - Opening, focusing, navigation, back/forward, reload, close, and detach within the authorized scope.
 - Bounded visible DOM snapshots and actionable, stale-checked element references.
 - PNG screenshots returned as actual image content to vision-capable models.
@@ -96,13 +110,13 @@ Pi model → arc_browser tool → session-local WebSocket bridge
                                     ↑ authenticated loopback
                           Arc companion service worker
                                     ↓ chrome.debugger / CDP
-                       active tab / manually shared tabs
+                  active / manually shared / owned agent tabs
 ```
 
 - The listener starts only on `/browser start`, not during extension discovery or startup.
 - The server binds only `127.0.0.1`, checks Host/path and a Chrome-extension Origin, and requires a random 256-bit secret. No HTTP control API or browser-page message bridge.
 - Pairing tokens are kept out of model-facing status/results. Tokens are sensitive: another process running as your user could read your clipboard; this is not protection from a compromised machine.
-- Connecting with **Follow active tab** authorizes the currently active allowed web tab on demand, not background tabs. Uncheck it before connecting for explicit per-tab sharing instead. The model cannot change this permission setting. No cookie, network-interception, arbitrary-JavaScript, or native-filesystem tools are exposed to the model.
+- Connecting with **Follow active tab** authorizes the currently active allowed web tab on demand, not background tabs. Choose Manual shared tabs for explicit per-tab sharing, or Background agent tabs for only newly created inactive task tabs. Background ownership is not restored after reconnect; existing tabs are never adopted, and selecting an agent tab pauses operations. The model cannot change this permission setting. No cookie, network-interception, arbitrary-JavaScript, or native-filesystem tools are exposed to the model.
 - Operations are serialized and never automatically retried. Cancelling/timing out disconnects and invalidates queued requests. Already-dispatched input cannot be undone.
 - Page text is marked untrusted. Prompt guidance warns against page instructions, secret extraction, and unauthorized consequential actions.
 - Default mutation approval uses Pi dialogs. `auto` is an explicit user choice, not a model-callable setting.
@@ -118,7 +132,9 @@ Snapshots and screenshots are saved under a session-created `pi-arc-browser-*` d
 
 - **No connected browser:** run `/browser start` and connect the companion. Multiple Pi sessions have different ports/tokens; pair the intended one.
 - **No active allowed tab:** select a normal HTTP(S) website tab in Arc, then ask Pi again. No Share click is needed in follow mode.
-- **Tab changed/not active:** Pi must call `tabs` again and inspect the current page. It cannot keep acting on the previous background tab. To use several tabs without switching, explicitly choose manual mode and share them.
+- **Tab changed/not active in follow mode:** Pi must call `tabs` again and inspect the current page. It cannot keep acting on the previous background tab. Choose Background agent tabs for separate work, or Manual shared tabs for existing tabs.
+- **No agent tabs in background mode:** normal at connect/reconnect. Ask Pi to open a URL; it cannot adopt your existing tabs.
+- **Agent tab active under user control:** switch away from that tab when ready. Pi will not move your focus itself.
 - **Tab not shared in manual mode:** share it from the popup. Manual mode does not automatically share user-created tabs.
 - **Stale reference:** take a new snapshot and identify the element again.
 - **DevTools/debugger conflict:** close that tab's DevTools. In follow mode, reconnect if access was paused; in manual mode, re-share. Cancelling the debugger banner revokes access; Pi must not silently reattach.
@@ -139,7 +155,7 @@ npm run check
 
 The test suite checks bridge authentication/origin rejection, serialized requests, cancellation/timeouts, protocol validation, approval races, and companion behavior using mocks where available. The Pi-loader smoke test uses the installed Pi runtime at the Homebrew path or `PI_EXTENSION_LOADER`; it skips on machines without that runtime.
 
-An additional **real Chromium extension smoke test** runs in a throwaway profile against a harmless local fixture. It covers follow-active and manual access, pairing, typing/clearing, clicks, selects, screenshots, scrolling, navigation, open/close, password refusal, stale/offscreen/obscured targets, focus traps, background-tab refusal, and disconnection. It never opens your Arc profile:
+An additional **real Chromium extension smoke test** runs in a throwaway profile against a harmless local fixture. It covers follow-active, manual, and dedicated background access, foreground preservation, ownership/revocation, switching during input and screenshots, pairing, typing/clearing, clicks, selects, screenshots, scrolling, navigation, open/close, password refusal, stale/offscreen/obscured targets, focus traps, background-tab refusal, and disconnection. It never opens your Arc profile:
 
 ```sh
 PI_BROWSER_CHROMIUM="/path/to/Chromium/executable" npm run test:browser
